@@ -4,7 +4,7 @@
   "private": true,
   "author": "Matepaper",
   "license": "MIT",
-  "description": "A local-first desktop toolkit for notes, memos, todos, day logs, and reading records.",
+  "description": "本地优先的 Windows 桌面个人工具箱，支持便签、备忘录、待办、日子记录、阅读记录和密码本。",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
