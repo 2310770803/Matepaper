@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Matepaper app icon">
+  <defs>
+    <linearGradient id="bg" x1="92" y1="54" x2="426" y2="466" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9fc7e7"/>
+      <stop offset="0.48" stop-color="#4f8fbd"/>
+      <stop offset="1" stop-color="#62c88d"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="162" y1="112" x2="348" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef7f0"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#1f4e63" flood-opacity="0.26"/>
+    </filter>
+  </defs>
+  <rect x="36" y="36" width="440" height="440" rx="112" fill="url(#bg)"/>
+  <path d="M98 116c54-56 142-74 226-50 65 18 105 58 126 93v-6c0-52-43-95-95-95H157c-27 0-49 22-59 58z" fill="#fff" opacity="0.22"/>
+  <g filter="url(#shadow)">
+    <path d="M160 116h138l78 78v178c0 25-20 45-45 45H160c-25 0-45-20-45-45V161c0-25 20-45 45-45z" fill="url(#paper)"/>
+    <path d="M298 116v58c0 15 12 27 27 27h51z" fill="#d7ecf6"/>
+    <path d="M171 230h170" stroke="#4f8fbd" stroke-width="22" stroke-linecap="round" opacity="0.78"/>
+    <path d="M171 286h136" stroke="#62c88d" stroke-width="22" stroke-linecap="round" opacity="0.88"/>
+    <path d="M171 342h86" stroke="#315c77" stroke-width="22" stroke-linecap="round" opacity="0.38"/>
+  </g>
+  <path d="M334 74l11 29 29 11-29 11-11 29-11-29-29-11 29-11z" fill="#fff" opacity="0.88"/>
+  <path d="M116 344l9 23 23 9-23 9-9 23-9-23-23-9 23-9z" fill="#fff" opacity="0.72"/>
+</svg>

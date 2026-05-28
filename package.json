@@ -1,0 +1,102 @@
+{
+  "name": "matepaper",
+  "version": "0.1.0",
+  "private": true,
+  "author": "Matepaper",
+  "license": "MIT",
+  "description": "A local-first desktop toolkit for notes, memos, todos, day logs, and reading records.",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1 --port 1420\" \"wait-on tcp:1420 && electron .\"",
+    "dev:web": "vite --host 127.0.0.1 --port 1420",
+    "build": "tsc && vite build",
+    "pack:win": "npm run build && powershell.exe -ExecutionPolicy Bypass -File scripts/package-win-dir.ps1",
+    "release:win": "powershell.exe -ExecutionPolicy Bypass -File scripts/release-win.ps1",
+    "test": "vitest run",
+    "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.matepaper.desktop",
+    "productName": "Matepaper",
+    "copyright": "Copyright (c) 2026 Matepaper",
+    "asar": false,
+    "npmRebuild": false,
+    "toolsets": {
+      "winCodeSign": "1.1.0"
+    },
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "public/app-icon.png",
+        "to": "app-icon.png"
+      },
+      {
+        "from": "public/app-icon.ico",
+        "to": "app-icon.ico"
+      }
+    ],
+    "afterPack": "scripts/after-pack-win.cjs",
+    "win": {
+      "icon": "public/app-icon.ico",
+      "signAndEditExecutable": false,
+      "signExts": [
+        "!.exe"
+      ],
+      "signtoolOptions": {
+        "sign": "./scripts/electron-builder-noop-sign.cjs"
+      },
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Matepaper",
+      "artifactName": "Matepaper-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Matepaper-Portable-${version}-${arch}.${ext}"
+    }
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.1",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "electron": "^38.8.6",
+    "electron-builder": "^26.8.1",
+    "jsdom": "^26.1.0",
+    "lucide-react": "^1.16.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0",
+    "vitest": "^3.2.4",
+    "wait-on": "^9.0.1"
+  }
+}

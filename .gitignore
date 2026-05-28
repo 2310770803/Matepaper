@@ -1,0 +1,18 @@
+node_modules/
+dist/
+release/
+.electron-builder-rcedit/
+.electron-builder-temp/
+.dev-logs/
+*.log
+*.zip
+.superpowers/
+matepaper-data*.json
+*.bak
+floral-notepaper-main/
+append_*.cjs
+fix*.cjs
+build_final.cjs
+_line43.js
+nul)
+启动 Matepaper.cmd
