@@ -21,6 +21,8 @@ describe("workspace domain", () => {
       "todo",
       "day",
       "reading",
+      "habit",
+      "expense",
       "password",
     ] satisfies ToolKind[]);
     expect(workspace.settings).toEqual({
@@ -69,11 +71,11 @@ describe("workspace domain", () => {
   it("creates usable defaults for every tool kind", () => {
     const now = "2026-05-27T08:00:00.000Z";
 
-    const drafts = (["note", "memo", "todo", "day", "reading", "password"] satisfies ToolKind[]).map((kind) =>
+    const drafts = (["note", "memo", "todo", "day", "reading", "habit", "expense", "password"] satisfies ToolKind[]).map((kind) =>
       createEntryDraft(kind, { title: `${kind} title`, body: "", now }),
     );
 
-    expect(drafts.map((entry) => entry.kind)).toEqual(["note", "memo", "todo", "day", "reading", "password"]);
+    expect(drafts.map((entry) => entry.kind)).toEqual(["note", "memo", "todo", "day", "reading", "habit", "expense", "password"]);
     expect(drafts.find((entry) => entry.kind === "memo")?.memo).toEqual({});
     expect(drafts.find((entry) => entry.kind === "todo")?.todo).toMatchObject({
       completed: false,
@@ -83,6 +85,14 @@ describe("workspace domain", () => {
     expect(drafts.find((entry) => entry.kind === "reading")?.reading).toMatchObject({
       status: "planned",
       progress: 0,
+    });
+    expect(drafts.find((entry) => entry.kind === "habit")?.habit).toMatchObject({
+      frequency: "daily",
+      streak: 0,
+    });
+    expect(drafts.find((entry) => entry.kind === "expense")?.expense).toMatchObject({
+      type: "expense",
+      date: "2026-05-27",
     });
     expect(drafts.find((entry) => entry.kind === "password")?.password).toEqual({
       username: undefined,

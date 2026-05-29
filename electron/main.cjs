@@ -47,6 +47,7 @@ let quickShortcutStatus = {
   accelerator: normalizeQuickCaptureShortcut(DEFAULT_QUICK_CAPTURE_SHORTCUT),
   registered: false,
 };
+let autoStartEnabled = null;
 
 function backgroundsDir() {
   return path.join(app.getPath("userData"), "backgrounds");
@@ -91,15 +92,19 @@ function createAppIcon() {
 }
 
 function setAutoStart(enabled) {
+  const next = Boolean(enabled);
+  if (autoStartEnabled === next) return autoStartEnabled;
   app.setLoginItemSettings({
-    openAtLogin: Boolean(enabled),
+    openAtLogin: next,
     path: process.execPath,
   });
-  return app.getLoginItemSettings().openAtLogin;
+  autoStartEnabled = app.getLoginItemSettings().openAtLogin;
+  return autoStartEnabled;
 }
 
 function getAutoStart() {
-  return app.getLoginItemSettings().openAtLogin;
+  autoStartEnabled = app.getLoginItemSettings().openAtLogin;
+  return autoStartEnabled;
 }
 
 function createMainWindow() {
@@ -213,17 +218,19 @@ function setupTray() {
 
 function setupIpc() {
   ipcMain.handle("workspace:load", () => store.load());
-  ipcMain.handle("workspace:save", (_event, workspace) => {
+  ipcMain.handle("workspace:save", (event, workspace) => {
     store.save(workspace);
     const quickShortcutLabel = labelForQuickCaptureShortcut(workspace?.settings?.quickCaptureShortcut);
     if (quickShortcutLabel !== quickShortcutStatus.label || !quickShortcutStatus.registered) {
       configureQuickCaptureShortcut(quickShortcutLabel);
     }
-    mainWindow?.webContents.send("workspace:changed", workspace);
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents !== event.sender) {
+      mainWindow.webContents.send("workspace:changed", workspace);
+    }
     if (typeof workspace?.settings?.autoStart === "boolean") {
       setAutoStart(workspace.settings.autoStart);
     }
-    if (quickWindow && !quickWindow.isDestroyed()) {
+    if (quickWindow && !quickWindow.isDestroyed() && quickWindow.webContents !== event.sender) {
       quickWindow.webContents.send("workspace:changed", workspace);
     }
     return workspace;

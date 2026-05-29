@@ -10,8 +10,8 @@ describe("dark theme CSS safeguards", () => {
     expect(css).not.toMatch(/\.app-shell\s*\{[^}]*border:\s*1px/);
   });
 
-  it("defines dark-specific sidebar footer and settings panel surfaces", () => {
-    expect(css).toContain(':root[data-theme="dark"] .sidebar-footer');
+  it("defines dark-specific sidebar and settings panel surfaces", () => {
+    expect(css).toContain(':root[data-theme="dark"] .heatmap-card');
     expect(css).toContain(':root[data-theme="dark"] .set-pane');
     expect(css).toContain(':root[data-theme="dark"] .settings-group');
   });

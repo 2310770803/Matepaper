@@ -15,6 +15,8 @@ export const FIRST_VERSION_MODULES: ToolModule[] = [
   { kind: "todo", label: "待办", description: "任务、优先级与完成状态" },
   { kind: "day", label: "日子记录", description: "日期、心情与生活片段" },
   { kind: "reading", label: "阅读记录", description: "书籍、进度与读后感" },
+  { kind: "habit", label: "习惯追踪", description: "频率、目标与连续天数" },
+  { kind: "expense", label: "收支记录", description: "金额、分类与来源去向" },
   { kind: "password", label: "密码本", description: "本地加密保存账号密码" },
 ];
 
@@ -105,6 +107,23 @@ export function createEntryDraft(kind: ToolKind, options: CreateEntryOptions): W
       finishedAt: options.reading?.finishedAt,
     };
   }
+  if (kind === "habit") {
+    base.habit = {
+      frequency: options.habit?.frequency ?? "daily",
+      target: options.habit?.target,
+      streak: options.habit?.streak ?? 0,
+      lastDoneAt: options.habit?.lastDoneAt,
+    };
+  }
+  if (kind === "expense") {
+    base.expense = {
+      type: options.expense?.type ?? "expense",
+      amount: options.expense?.amount,
+      category: options.expense?.category,
+      date: options.expense?.date ?? now.slice(0, 10),
+      merchant: options.expense?.merchant,
+    };
+  }
   if (kind === "password") {
     base.password = {
       username: options.password?.username,
@@ -153,6 +172,15 @@ function searchableText(entry: WorkspaceEntry): string {
     entry.reading?.currentPage?.toString(),
     entry.reading?.totalPages?.toString(),
     entry.reading?.rating?.toString(),
+    entry.habit?.frequency,
+    entry.habit?.target?.toString(),
+    entry.habit?.streak?.toString(),
+    entry.habit?.lastDoneAt,
+    entry.expense?.type,
+    entry.expense?.amount?.toString(),
+    entry.expense?.category,
+    entry.expense?.date,
+    entry.expense?.merchant,
     entry.password?.username,
     entry.password?.url,
   ]

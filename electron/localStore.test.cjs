@@ -22,6 +22,8 @@ describe("localStore", () => {
       "todo",
       "day",
       "reading",
+      "habit",
+      "expense",
       "password",
     ]);
     expect(workspace.settings.theme).toBe("paper");

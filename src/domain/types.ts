@@ -1,4 +1,4 @@
-export type ToolKind = "note" | "memo" | "todo" | "day" | "reading" | "password";
+export type ToolKind = "note" | "memo" | "todo" | "day" | "reading" | "habit" | "expense" | "password";
 
 export interface ToolModule {
   kind: ToolKind;
@@ -77,6 +77,21 @@ export interface PasswordFields {
   updatedSecretAt?: string;
 }
 
+export interface HabitFields {
+  frequency: "daily" | "weekly";
+  target?: number;
+  streak?: number;
+  lastDoneAt?: string;
+}
+
+export interface ExpenseFields {
+  type: "expense" | "income";
+  amount?: number;
+  category?: string;
+  date?: string;
+  merchant?: string;
+}
+
 export interface WorkspaceEntry {
   id: string;
   kind: ToolKind;
@@ -93,6 +108,8 @@ export interface WorkspaceEntry {
   todo?: TodoFields;
   day?: DayFields;
   reading?: ReadingFields;
+  habit?: HabitFields;
+  expense?: ExpenseFields;
   password?: PasswordFields;
 }
 
@@ -114,6 +131,8 @@ export interface CreateEntryOptions {
   todo?: Partial<TodoFields>;
   day?: Partial<DayFields>;
   reading?: Partial<ReadingFields>;
+  habit?: Partial<HabitFields>;
+  expense?: Partial<ExpenseFields>;
   password?: Partial<PasswordFields>;
 }
 

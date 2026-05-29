@@ -8,6 +8,8 @@ const MODULES = [
   { kind: "todo", label: "待办", description: "任务、优先级与完成状态" },
   { kind: "day", label: "日子记录", description: "日期、心情与生活片段" },
   { kind: "reading", label: "阅读记录", description: "书籍、进度与读后感" },
+  { kind: "habit", label: "习惯追踪", description: "频率、目标与连续天数" },
+  { kind: "expense", label: "收支记录", description: "金额、分类与来源去向" },
   { kind: "password", label: "密码本", description: "本地加密保存账号密码" },
 ];
 

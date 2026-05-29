@@ -7,7 +7,6 @@ import {
   Check,
   ChevronDown,
   CircleDot,
-  Cloud,
   Copy,
   Droplets,
   Eraser,
@@ -33,9 +32,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
-  Tag,
   Tags,
-  Trash2,
   Type,
   Upload,
   WandSparkles,
@@ -47,7 +44,6 @@ import { markdownImportToNote } from "./domain/importMarkdown";
 import { decryptPasswordSecret, encryptPasswordSecret } from "./domain/passwordVault";
 import {
   createEntryDraft,
-  moduleStats,
   queryEntries,
   updateEntry,
   upsertEntry,
@@ -56,6 +52,9 @@ import type {
   AccentOption,
   AppSettings,
   EditorDensity,
+  ExpenseFields,
+  HabitFields,
+  ModuleStats,
   PasswordFields,
   ReadingFields,
   ReadingStatus,
@@ -68,10 +67,21 @@ import type {
 import { applyAppearanceSettings } from "./ui/appearance";
 import { MODULE_META } from "./ui/moduleMeta";
 
-const QUICK_KINDS: ToolKind[] = ["note", "memo", "todo", "day", "reading", "password"];
+const QUICK_KINDS: ToolKind[] = ["note", "memo", "todo", "day", "reading", "habit", "expense", "password"];
 const QUICK_SHORTCUT_CHOICES = ["Ctrl+Shift+Space", "Ctrl+Alt+N", "Alt+Space", "Ctrl+Space"];
 const HEATMAP_DAY_CHOICES = [28, 84, 168];
 const MOOD_OPTIONS = ["平静", "开心", "疲惫", "专注", "焦虑", "松弛"];
+const SAVE_DEBOUNCE_MS = 420;
+
+type CommitOptions = {
+  immediate?: boolean;
+};
+
+type WorkbenchMetrics = {
+  total: number;
+  favoriteTotal: number;
+  statsByKind: Record<ToolKind, ModuleStats>;
+};
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -121,6 +131,34 @@ function togglePinnedTags(entry: WorkspaceEntry) {
   return ["置顶", ...entry.tags];
 }
 
+function emptyStats(): ModuleStats {
+  return { total: 0, active: 0, completed: 0, archived: 0 };
+}
+
+function buildWorkbenchMetrics(entries: WorkspaceEntry[]): WorkbenchMetrics {
+  const statsByKind = QUICK_KINDS.reduce(
+    (stats, kind) => {
+      stats[kind] = emptyStats();
+      return stats;
+    },
+    {} as Record<ToolKind, ModuleStats>,
+  );
+  let total = 0;
+  let favoriteTotal = 0;
+
+  for (const entry of entries) {
+    const stats = statsByKind[entry.kind];
+    stats.total += 1;
+    if (entry.archived) stats.archived += 1;
+    if (entry.todo?.completed) stats.completed += 1;
+    if (!entry.archived && !entry.todo?.completed) stats.active += 1;
+    if (!entry.archived) total += 1;
+    if (entry.favorite && !entry.archived) favoriteTotal += 1;
+  }
+
+  return { total, favoriteTotal, statsByKind };
+}
+
 function formatDateTimeShort(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value.slice(0, 16).replace("T", " ");
@@ -148,6 +186,10 @@ function newEntryDefaults(kind: ToolKind) {
         body: "",
         reading: { status: "reading" as const, progress: 0 },
       };
+    case "habit":
+      return { title: "新的习惯", body: "", habit: { frequency: "daily" as const, streak: 0 } };
+    case "expense":
+      return { title: "新的收支记录", body: "", expense: { type: "expense" as const, date } };
     case "password":
       return { title: "新的密码记录", body: "", password: { username: "", url: "" } };
   }
@@ -179,6 +221,17 @@ function entryPreview(entry: WorkspaceEntry) {
         : "";
     return [entry.reading?.author, status, progress, pages].filter(Boolean).join(" · ");
   }
+  if (entry.kind === "habit") {
+    const frequency = entry.habit?.frequency === "weekly" ? "每周" : "每日";
+    const streak = `${entry.habit?.streak ?? 0} 天连续`;
+    const target = entry.habit?.target ? `目标 ${entry.habit.target}` : "未设目标";
+    return `${frequency} · ${streak} · ${target}`;
+  }
+  if (entry.kind === "expense") {
+    const type = entry.expense?.type === "income" ? "收入" : "支出";
+    const amount = typeof entry.expense?.amount === "number" ? `¥${entry.expense.amount.toFixed(2)}` : "未填写金额";
+    return [type, amount, entry.expense?.category, entry.expense?.merchant].filter(Boolean).join(" · ");
+  }
   if (entry.body.trim()) return entry.body.trim().replace(/\s+/g, " ").slice(0, 96);
   if (entry.kind === "day" && entry.day?.mood) return `心情：${entry.day.mood}`;
   return "还没有内容";
@@ -203,6 +256,25 @@ function readingFields(entry: WorkspaceEntry): ReadingFields {
     rating: entry.reading?.rating,
     startedAt: entry.reading?.startedAt,
     finishedAt: entry.reading?.finishedAt,
+  };
+}
+
+function habitFields(entry: WorkspaceEntry): HabitFields {
+  return {
+    frequency: entry.habit?.frequency ?? "daily",
+    target: entry.habit?.target,
+    streak: entry.habit?.streak ?? 0,
+    lastDoneAt: entry.habit?.lastDoneAt,
+  };
+}
+
+function expenseFields(entry: WorkspaceEntry): ExpenseFields {
+  return {
+    type: entry.expense?.type ?? "expense",
+    amount: entry.expense?.amount,
+    category: entry.expense?.category,
+    date: entry.expense?.date ?? today(),
+    merchant: entry.expense?.merchant,
   };
 }
 
@@ -279,15 +351,24 @@ function Titlebar({
   );
 }
 
-function ActivityHeatmap({ workspace }: { workspace: Workspace }) {
-  if (!workspace.settings.showActivityHeatmap) return null;
-  const entries = Object.values(workspace.entriesById);
-  const days = workspace.settings.heatmapDays || 84;
-  const heatmap = buildActivityHeatmap(entries, { days });
+function ActivityHeatmap({
+  entries,
+  settings,
+}: {
+  entries: WorkspaceEntry[];
+  settings: AppSettings;
+}) {
+  const days = settings.heatmapDays || 84;
+  const heatmap = useMemo(
+    () => (settings.showActivityHeatmap ? buildActivityHeatmap(entries, { days }) : []),
+    [days, entries, settings.showActivityHeatmap],
+  );
+  if (!settings.showActivityHeatmap) return null;
   const summary = summarizeActivityHeatmap(heatmap);
   const columns = Math.ceil(heatmap.length / 7);
-  const heatmapCellSize = columns > 12 ? 5 : 12;
-  const heatmapGap = columns > 12 ? 2 : 3;
+  const heatmapCellSize = columns > 18 ? 8 : columns > 12 ? 10 : columns > 6 ? 12 : 18;
+  const heatmapGap = columns > 18 ? 2 : columns > 12 ? 2 : 3;
+  const heatmapGridWidth = columns * heatmapCellSize + Math.max(0, columns - 1) * heatmapGap;
 
   return (
     <section className="heatmap-card">
@@ -306,15 +387,17 @@ function ActivityHeatmap({ workspace }: { workspace: Workspace }) {
             "--heatmap-cols": columns,
             "--heatmap-cell": `${heatmapCellSize}px`,
             "--heatmap-gap": `${heatmapGap}px`,
+            "--heatmap-grid-width": `${heatmapGridWidth}px`,
           } as React.CSSProperties
         }
       >
-        {heatmap.map((day) => (
+        {heatmap.map((day, index) => (
           <span
             key={day.date}
             className="heatmap-cell"
             data-lv={day.level}
             title={`${day.date} · ${day.count} 条记录`}
+            style={{ "--cell-delay": `${Math.min(index, 30) * 7}ms` } as React.CSSProperties}
           />
         ))}
       </div>
@@ -340,26 +423,19 @@ function ActivityHeatmap({ workspace }: { workspace: Workspace }) {
 
 function ModuleSidebar({
   workspace,
+  metrics,
+  allEntries,
   activeKind,
-  includeArchived,
   onSelect,
-  onQuickCapture,
   onImportMarkdown,
-  onToggleArchived,
 }: {
   workspace: Workspace;
+  metrics: WorkbenchMetrics;
+  allEntries: WorkspaceEntry[];
   activeKind: ToolKind;
-  includeArchived: boolean;
   onSelect: (kind: ToolKind) => void;
-  onQuickCapture: () => void;
   onImportMarkdown: () => void;
-  onToggleArchived: () => void;
 }) {
-  const total = Object.values(workspace.entriesById).filter((entry) => !entry.archived).length;
-  const favoriteTotal = Object.values(workspace.entriesById).filter(
-    (entry) => entry.favorite && !entry.archived,
-  ).length;
-
   return (
     <aside className="sidebar">
       <div className="ws-card">
@@ -369,11 +445,11 @@ function ModuleSidebar({
         </div>
         <div className="ws-stats">
           <span className="ws-stat">
-            <strong>{total}</strong>
+            <strong>{metrics.total}</strong>
             活跃记录
           </span>
           <span className="ws-stat">
-            <strong>{favoriteTotal}</strong>
+            <strong>{metrics.favoriteTotal}</strong>
             收藏
           </span>
         </div>
@@ -388,7 +464,7 @@ function ModuleSidebar({
       <nav className="module-nav">
         {workspace.modules.map((module) => {
           const meta = MODULE_META[module.kind];
-          const stats = moduleStats(workspace, module.kind);
+          const stats = metrics.statsByKind[module.kind] ?? emptyStats();
           const Icon = meta.Icon;
           return (
             <button
@@ -410,18 +486,7 @@ function ModuleSidebar({
           );
         })}
       </nav>
-      <ActivityHeatmap workspace={workspace} />
-      <div className="sidebar-footer">
-        <IconButton title="标签" onClick={() => onSelect("note")}>
-          <Tag size={16} />
-        </IconButton>
-        <IconButton title={includeArchived ? "隐藏归档" : "查看归档"} active={includeArchived} onClick={onToggleArchived}>
-          <Trash2 size={16} />
-        </IconButton>
-        <IconButton title="导入 Markdown" onClick={onImportMarkdown}>
-          <Cloud size={16} />
-        </IconButton>
-      </div>
+      <ActivityHeatmap entries={allEntries} settings={workspace.settings} />
     </aside>
   );
 }
@@ -744,6 +809,22 @@ function EntryInsightPanel({ entry }: { entry: WorkspaceEntry }) {
       { label: "评分", value: entry.reading?.rating ? `${entry.reading.rating}/5` : "未评分", icon: <Star size={15} /> },
     );
   }
+  if (entry.kind === "habit") {
+    const frequency = entry.habit?.frequency === "weekly" ? "每周" : "每日";
+    cards.push(
+      { label: "频率", value: frequency, icon: <Activity size={15} /> },
+      { label: "连续", value: `${entry.habit?.streak ?? 0} 天`, icon: <Sparkles size={15} /> },
+      { label: "最近", value: entry.habit?.lastDoneAt ?? "未打卡", icon: <CalendarClock size={15} /> },
+    );
+  }
+  if (entry.kind === "expense") {
+    const amount = typeof entry.expense?.amount === "number" ? `¥${entry.expense.amount.toFixed(2)}` : "未填写";
+    cards.push(
+      { label: "类型", value: entry.expense?.type === "income" ? "收入" : "支出", icon: <CircleDot size={15} /> },
+      { label: "金额", value: amount, icon: <Activity size={15} /> },
+      { label: "分类", value: entry.expense?.category || "未分类", icon: <Tags size={15} /> },
+    );
+  }
   if (entry.kind === "password") {
     cards.push(
       { label: "账号", value: entry.password?.username || "未填写", icon: <KeyRound size={15} /> },
@@ -776,10 +857,12 @@ function EditorPane({
   entry,
   onPatch,
   onArchive,
+  saveStatus = "saved",
 }: {
   entry: WorkspaceEntry | null;
   onPatch: (patch: Partial<WorkspaceEntry>) => Promise<void>;
   onArchive: () => void;
+  saveStatus?: "saved" | "saving";
 }) {
   if (!entry) {
     return (
@@ -1114,6 +1197,143 @@ function EditorPane({
         </div>
       ) : null}
 
+      {entry.kind === "habit" ? (
+        <div className="habit-stack">
+          <div className="reading-grid reading-grid-detail">
+            <label className="field-line">
+              <span>频率</span>
+              <select
+                value={entry.habit?.frequency ?? "daily"}
+                onChange={(event) =>
+                  void onPatch({
+                    habit: { ...habitFields(entry), frequency: event.target.value as HabitFields["frequency"] },
+                  })
+                }
+              >
+                <option value="daily">每日</option>
+                <option value="weekly">每周</option>
+              </select>
+            </label>
+            <label className="field-line">
+              <span>目标</span>
+              <input
+                type="number"
+                min="0"
+                value={entry.habit?.target ?? ""}
+                onChange={(event) =>
+                  void onPatch({
+                    habit: {
+                      ...habitFields(entry),
+                      target: event.target.value ? Number(event.target.value) : undefined,
+                    },
+                  })
+                }
+                placeholder="次数"
+              />
+            </label>
+            <label className="field-line">
+              <span>连续</span>
+              <input
+                type="number"
+                min="0"
+                value={entry.habit?.streak ?? 0}
+                onChange={(event) =>
+                  void onPatch({ habit: { ...habitFields(entry), streak: Number(event.target.value) } })
+                }
+              />
+            </label>
+          </div>
+          <div className="quick-presets">
+            <button
+              type="button"
+              onClick={() =>
+                void onPatch({
+                  habit: {
+                    ...habitFields(entry),
+                    streak: (entry.habit?.streak ?? 0) + 1,
+                    lastDoneAt: today(),
+                  },
+                })
+              }
+            >
+              今日打卡
+            </button>
+            <button
+              type="button"
+              onClick={() => void onPatch({ habit: { ...habitFields(entry), streak: 0, lastDoneAt: undefined } })}
+            >
+              重置连续
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {entry.kind === "expense" ? (
+        <div className="expense-stack">
+          <div className="reading-grid reading-grid-detail">
+            <label className="field-line">
+              <span>类型</span>
+              <select
+                value={entry.expense?.type ?? "expense"}
+                onChange={(event) =>
+                  void onPatch({
+                    expense: { ...expenseFields(entry), type: event.target.value as ExpenseFields["type"] },
+                  })
+                }
+              >
+                <option value="expense">支出</option>
+                <option value="income">收入</option>
+              </select>
+            </label>
+            <label className="field-line">
+              <span>金额</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={entry.expense?.amount ?? ""}
+                onChange={(event) =>
+                  void onPatch({
+                    expense: {
+                      ...expenseFields(entry),
+                      amount: event.target.value ? Number(event.target.value) : undefined,
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="field-line">
+              <span>日期</span>
+              <input
+                type="date"
+                value={entry.expense?.date ?? today()}
+                onChange={(event) => void onPatch({ expense: { ...expenseFields(entry), date: event.target.value } })}
+              />
+            </label>
+            <label className="field-line">
+              <span>分类</span>
+              <input
+                value={entry.expense?.category ?? ""}
+                onChange={(event) =>
+                  void onPatch({ expense: { ...expenseFields(entry), category: event.target.value } })
+                }
+                placeholder="餐饮 / 交通 / 工资"
+              />
+            </label>
+            <label className="field-line">
+              <span>对象</span>
+              <input
+                value={entry.expense?.merchant ?? ""}
+                onChange={(event) =>
+                  void onPatch({ expense: { ...expenseFields(entry), merchant: event.target.value } })
+                }
+                placeholder="商家 / 来源"
+              />
+            </label>
+          </div>
+        </div>
+      ) : null}
+
       {entry.kind === "password" ? <PasswordEditor entry={entry} onPatch={onPatch} /> : null}
 
       <textarea
@@ -1137,9 +1357,9 @@ function EditorPane({
           }
           placeholder="标签，用逗号分隔"
         />
-        <span className="autosave-state">
-          <Check size={14} />
-          已自动保存
+        <span className={`autosave-state ${saveStatus}`}>
+          {saveStatus === "saving" ? <CircleDot size={14} /> : <Check size={14} />}
+          {saveStatus === "saving" ? "正在保存" : "已自动保存"}
         </span>
       </div>
     </main>
@@ -1516,9 +1736,12 @@ function Workbench() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [includeArchived, setIncludeArchived] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving">("saved");
   const [quickShortcutStatus, setQuickShortcutStatus] = useState<QuickCaptureShortcutStatus | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveRef = useRef<Workspace | null>(null);
+  const saveSequenceRef = useRef(0);
 
   useEffect(() => {
     void matepaperApi.loadWorkspace().then(setWorkspace);
@@ -1528,6 +1751,14 @@ function Workbench() {
     return () => {
       stopWorkspace();
       stopShortcut();
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (pendingSaveRef.current) {
+        void matepaperApi.saveWorkspace(pendingSaveRef.current);
+        pendingSaveRef.current = null;
+      }
     };
   }, []);
 
@@ -1536,14 +1767,17 @@ function Workbench() {
     applyAppearanceSettings(workspace.settings);
   }, [workspace?.settings]);
 
+  const entriesById = workspace?.entriesById;
+  const allEntries = useMemo(() => (entriesById ? Object.values(entriesById) : []), [entriesById]);
+  const metrics = useMemo(() => buildWorkbenchMetrics(allEntries), [allEntries]);
   const entries = useMemo(
-    () =>
-      workspace
-        ? queryEntries(workspace, { kind: activeKind, search, includeArchived })
-            .filter((entry) => (favoritesOnly ? entry.favorite : true))
-            .sort((left, right) => Number(isPinned(right)) - Number(isPinned(left)))
-        : [],
-    [activeKind, favoritesOnly, includeArchived, search, workspace],
+    () => {
+      if (!workspace || !entriesById) return [];
+      return queryEntries({ ...workspace, entriesById }, { kind: activeKind, search, includeArchived: false })
+        .filter((entry) => (favoritesOnly ? entry.favorite : true))
+        .sort((left, right) => Number(isPinned(right)) - Number(isPinned(left)));
+    },
+    [activeKind, entriesById, favoritesOnly, search],
   );
   const selected = selectedId && workspace ? workspace.entriesById[selectedId] ?? null : null;
 
@@ -1554,20 +1788,53 @@ function Workbench() {
     }
   }, [entries, selectedId]);
 
-  async function commit(next: Workspace) {
-    setWorkspace(next);
+  function scheduleWorkspaceSave(next: Workspace) {
+    setSaveStatus("saving");
+    pendingSaveRef.current = next;
+    const sequence = ++saveSequenceRef.current;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const pending = pendingSaveRef.current;
+      pendingSaveRef.current = null;
+      saveTimerRef.current = null;
+      if (pending) {
+        void matepaperApi.saveWorkspace(pending).finally(() => {
+          if (saveSequenceRef.current === sequence && !pendingSaveRef.current) setSaveStatus("saved");
+        });
+      }
+    }, SAVE_DEBOUNCE_MS);
+  }
+
+  async function saveWorkspaceImmediately(next: Workspace) {
+    setSaveStatus("saving");
+    const sequence = ++saveSequenceRef.current;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    pendingSaveRef.current = null;
     await matepaperApi.saveWorkspace(next);
+    if (saveSequenceRef.current === sequence && !pendingSaveRef.current) setSaveStatus("saved");
+  }
+
+  async function commit(next: Workspace, options: CommitOptions = {}) {
+    setWorkspace(next);
+    if (options.immediate) {
+      await saveWorkspaceImmediately(next);
+      return;
+    }
+    scheduleWorkspaceSave(next);
   }
 
   async function createEntry(kind = activeKind) {
     if (!workspace) return;
     const entry = createEntryDraft(kind, { ...newEntryDefaults(kind), now: new Date().toISOString() });
-    await commit(upsertEntry(workspace, entry));
+    await commit(upsertEntry(workspace, entry), { immediate: true });
     setActiveKind(kind);
     setSelectedId(entry.id);
   }
 
-  async function patchSelected(patch: Partial<WorkspaceEntry>) {
+  async function patchSelected(patch: Partial<WorkspaceEntry>, options: CommitOptions = {}) {
     if (!workspace || !selected) return;
     const now = new Date().toISOString();
     const next = updateEntry(workspace, selected.id, (entry) => ({
@@ -1575,14 +1842,21 @@ function Workbench() {
       ...patch,
       updatedAt: now,
     }));
-    await commit(next);
+    await commit(next, options);
   }
 
   async function patchSettings(settings: AppSettings) {
     if (!workspace) return;
-    await commit({ ...workspace, settings, updatedAt: new Date().toISOString() });
-    const status = await matepaperApi.getQuickCaptureShortcutStatus();
-    setQuickShortcutStatus(status);
+    const shortcutChanged = settings.quickCaptureShortcut !== workspace.settings.quickCaptureShortcut;
+    const autoStartChanged = settings.autoStart !== workspace.settings.autoStart;
+    await commit(
+      { ...workspace, settings, updatedAt: new Date().toISOString() },
+      { immediate: shortcutChanged || autoStartChanged },
+    );
+    if (shortcutChanged) {
+      const status = await matepaperApi.getQuickCaptureShortcutStatus();
+      setQuickShortcutStatus(status);
+    }
   }
 
   async function chooseBackgroundImage() {
@@ -1600,7 +1874,7 @@ function Workbench() {
   }
 
   async function archiveSelected() {
-    await patchSelected({ archived: true });
+    await patchSelected({ archived: true }, { immediate: true });
   }
 
   async function importMarkdown() {
@@ -1609,7 +1883,7 @@ function Workbench() {
     if (!files.length) return;
     const imported = files.map((file) => markdownImportToNote({ ...file, now: new Date().toISOString() }));
     const next = imported.reduce((state, entry) => upsertEntry(state, entry), workspace);
-    await commit(next);
+    await commit(next, { immediate: true });
     setActiveKind("note");
     setSelectedId(imported[0]?.id ?? null);
   }
@@ -1671,15 +1945,14 @@ function Workbench() {
       <div className="workspace">
         <ModuleSidebar
           workspace={workspace}
+          metrics={metrics}
+          allEntries={allEntries}
           activeKind={activeKind}
-          includeArchived={includeArchived}
           onSelect={(kind) => {
             setActiveKind(kind);
             setSelectedId(null);
           }}
-          onQuickCapture={() => void matepaperApi.openQuickCapture()}
           onImportMarkdown={() => void importMarkdown()}
-          onToggleArchived={() => setIncludeArchived((value) => !value)}
         />
         <div className="entry-list-wrap">
           <EntryList
@@ -1707,7 +1980,12 @@ function Workbench() {
             onChooseBackground={() => void chooseBackgroundImage()}
           />
         ) : (
-          <EditorPane entry={selected} onPatch={patchSelected} onArchive={() => void archiveSelected()} />
+          <EditorPane
+            entry={selected}
+            onPatch={patchSelected}
+            onArchive={() => void archiveSelected()}
+            saveStatus={saveStatus}
+          />
         )}
       </div>
     </div>
@@ -1735,6 +2013,14 @@ function QuickCapture() {
   const [readingCurrentPage, setReadingCurrentPage] = useState("");
   const [readingTotalPages, setReadingTotalPages] = useState("");
   const [readingRating, setReadingRating] = useState("");
+  const [habitFrequency, setHabitFrequency] = useState<HabitFields["frequency"]>("daily");
+  const [habitTarget, setHabitTarget] = useState("");
+  const [habitDone, setHabitDone] = useState(false);
+  const [expenseType, setExpenseType] = useState<ExpenseFields["type"]>("expense");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseCategory, setExpenseCategory] = useState("");
+  const [expenseDate, setExpenseDate] = useState(today());
+  const [expenseMerchant, setExpenseMerchant] = useState("");
   const [passwordUsername, setPasswordUsername] = useState("");
   const [passwordUrl, setPasswordUrl] = useState("");
   const [passwordSecret, setPasswordSecret] = useState("");
@@ -1780,6 +2066,14 @@ function QuickCapture() {
     setReadingCurrentPage("");
     setReadingTotalPages("");
     setReadingRating("");
+    setHabitFrequency("daily");
+    setHabitTarget("");
+    setHabitDone(false);
+    setExpenseType("expense");
+    setExpenseAmount("");
+    setExpenseCategory("");
+    setExpenseDate(today());
+    setExpenseMerchant("");
     setPasswordUsername("");
     setPasswordUrl("");
     setPasswordSecret("");
@@ -1837,6 +2131,25 @@ function QuickCapture() {
               rating: readingRating ? Number(readingRating) : undefined,
             }
           : undefined,
+      habit:
+        kind === "habit"
+          ? {
+              frequency: habitFrequency,
+              target: habitTarget ? Number(habitTarget) : undefined,
+              streak: habitDone ? 1 : 0,
+              lastDoneAt: habitDone ? today() : undefined,
+            }
+          : undefined,
+      expense:
+        kind === "expense"
+          ? {
+              type: expenseType,
+              amount: expenseAmount ? Number(expenseAmount) : undefined,
+              category: expenseCategory || undefined,
+              date: expenseDate || today(),
+              merchant: expenseMerchant || undefined,
+            }
+          : undefined,
       password:
         kind === "password"
           ? {
@@ -1855,7 +2168,7 @@ function QuickCapture() {
   }
 
   return (
-    <div className="quick-shell">
+    <div className={`quick-shell ${workspace?.settings.animations === false ? "no-motion" : ""}`}>
       <Titlebar compact />
       <div className="quick-body">
         <div className="quick-kind-row">
@@ -2022,6 +2335,56 @@ function QuickCapture() {
                 onChange={(event) => setReadingProgress(Number(event.target.value))}
               />
             </label>
+          </div>
+        ) : null}
+        {kind === "habit" ? (
+          <div className="quick-fields">
+            <div className="quick-grid">
+              <label>
+                <span>频率</span>
+                <select value={habitFrequency} onChange={(event) => setHabitFrequency(event.target.value as HabitFields["frequency"])}>
+                  <option value="daily">每日</option>
+                  <option value="weekly">每周</option>
+                </select>
+              </label>
+              <label>
+                <span>目标次数</span>
+                <input type="number" min="0" value={habitTarget} onChange={(event) => setHabitTarget(event.target.value)} />
+              </label>
+              <label className="quick-check">
+                <input type="checkbox" checked={habitDone} onChange={(event) => setHabitDone(event.target.checked)} />
+                <span>今日已打卡</span>
+              </label>
+            </div>
+          </div>
+        ) : null}
+        {kind === "expense" ? (
+          <div className="quick-fields">
+            <div className="quick-grid">
+              <label>
+                <span>类型</span>
+                <select value={expenseType} onChange={(event) => setExpenseType(event.target.value as ExpenseFields["type"])}>
+                  <option value="expense">支出</option>
+                  <option value="income">收入</option>
+                </select>
+              </label>
+              <label>
+                <span>金额</span>
+                <input type="number" min="0" step="0.01" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} />
+              </label>
+              <label>
+                <span>日期</span>
+                <input type="date" value={expenseDate} onChange={(event) => setExpenseDate(event.target.value)} />
+              </label>
+              <label>
+                <span>分类</span>
+                <input value={expenseCategory} onChange={(event) => setExpenseCategory(event.target.value)} placeholder="餐饮 / 交通" />
+              </label>
+              <label>
+                <span>对象</span>
+                <input value={expenseMerchant} onChange={(event) => setExpenseMerchant(event.target.value)} placeholder="商家 / 来源" />
+              </label>
+            </div>
           </div>
         ) : null}
         {kind === "password" ? (

@@ -4,7 +4,9 @@ import {
   BookOpenCheck,
   CalendarDays,
   CheckSquare2,
+  Flame,
   KeyRound,
+  WalletCards,
   StickyNote,
 } from "lucide-react";
 import type { ToolKind } from "../domain/types";
@@ -14,7 +16,7 @@ export const MODULE_META: Record<
   {
     label: string;
     description: string;
-    accent: "green" | "blue" | "coral" | "gold" | "violet" | "slate";
+    accent: "green" | "blue" | "coral" | "gold" | "violet" | "teal" | "amber" | "slate";
     Icon: LucideIcon;
   }
 > = {
@@ -47,6 +49,18 @@ export const MODULE_META: Record<
     description: "书籍、进度、摘记",
     accent: "violet",
     Icon: BookOpenCheck,
+  },
+  habit: {
+    label: "习惯追踪",
+    description: "打卡、频率、连续",
+    accent: "teal",
+    Icon: Flame,
+  },
+  expense: {
+    label: "收支记录",
+    description: "金额、分类、去向",
+    accent: "amber",
+    Icon: WalletCards,
   },
   password: {
     label: "密码本",
